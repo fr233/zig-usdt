@@ -9,11 +9,11 @@ inline fn gen_semaphore_var_name(comptime provider:[]const u8, comptime name: []
 
 pub inline fn SDT_DEFINE_SEMAPHORE(comptime provider:[]const u8, comptime name: []const u8) void {
     comptime const sema_name = gen_semaphore_var_name(provider, name);
-    
+
     const SEMAPHORE = struct {
-        var x:u16 linksection(".probes") = 0;
+        var x:u16 = 0;
     };
-    @export(SEMAPHORE.x, .{ .name = sema_name, .linkage = .Strong });
+    @export(SEMAPHORE.x, .{ .name = sema_name, .linkage = .Strong , .section=".probes"});
 }
 
 
