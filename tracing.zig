@@ -1,4 +1,5 @@
-const fmt = @import("std").fmt;
+const std = @import("std");
+const fmt = std.fmt;
 
 
 inline fn gen_semaphore_var_name(comptime provider:[]const u8, comptime name: []const u8) 
@@ -9,25 +10,16 @@ inline fn gen_semaphore_var_name(comptime provider:[]const u8, comptime name: []
 pub inline fn SDT_DEFINE_SEMAPHORE(comptime provider:[]const u8, comptime name: []const u8) void {
     comptime const sema_name = gen_semaphore_var_name(provider, name);
     
-    comptime const asm_str = 
-    ".globl " ++ sema_name ++ "\n"
-    ++ ".section .probes, \"aw\"\n"
-    ++ ".align 2 \n"
-    ++ ".type " ++ sema_name ++ ", @object\n"
-    ++ ".size " ++ sema_name ++ ", 2\n"
-    ++ sema_name ++ ": \n"
-    ++ ".zero 2\n"
-    ++ ".text\n";
-
-    asm volatile(asm_str
-    :
-    :
-    );
+    const SEMAPHORE = struct {
+        var x:u16 linksection(".probes") = 0;
+    };
+    @export(SEMAPHORE.x, .{ .name = sema_name, .linkage = .Strong });
 }
 
 
 pub inline fn SDT_ENABLED(comptime provider:[]const u8, comptime name: []const u8) bool {
     comptime const sema_name = gen_semaphore_var_name(provider, name);
+    
     var ret: u32 = 0;
     asm volatile(
         "movzwl " ++ sema_name ++ "(%%rip), %[ret]"
@@ -42,7 +34,7 @@ pub inline fn SDT(comptime provider:[]const u8, comptime name: []const u8, args:
 }
 
 pub inline fn SDT_WITH_SEMAPHORE(comptime provider:[]const u8, comptime name: []const u8, args:anytype) void {
-    comptime const sema_name = "sdt_semaphore_" ++ provider ++ "_" ++ name;
+    comptime const sema_name = gen_semaphore_var_name(provider, name);
     _SDT(provider, name, sema_name , args);
 }
 
@@ -50,6 +42,17 @@ pub inline fn SDT_WITH_SEMAPHORE(comptime provider:[]const u8, comptime name: []
 
 
 inline fn _SDT(comptime provider:[]const u8, comptime name: []const u8, comptime sema: []const u8, args:anytype) void {
+    comptime const width = blk: {
+        const ptr_width = std.builtin.cpu.arch.ptrBitWidth();
+        if(ptr_width == 64){
+            break :blk " .8byte ";
+        } else if(ptr_width == 32){
+            break :blk " .4byte ";
+        } else {
+            unreachable;
+        }
+    };
+
     comptime const part1 = 
     \\ 990: nop
     \\ .pushsection .note.stapsdt,"","note"
@@ -57,11 +60,13 @@ inline fn _SDT(comptime provider:[]const u8, comptime name: []const u8, comptime
     \\ .4byte 992f-991f,994f-993f,3
     \\ 991: .asciz "stapsdt"
     \\ 992: .balign 4
-    \\ 993: .8byte 990b
-    \\ .8byte 0
     \\
-    ++ " .8byte " ++ sema ++ "\n"
-    ++ " .asciz \"" ++ provider ++ "\"\n .asciz \"" ++ name ++ "\"\n .asciz \"";
+    ++ " 993:" ++ width ++ "990b" ++ "\n"
+    ++ width ++ "0" ++ "\n"
+    ++ width ++ sema ++ "\n"
+    ++ " .asciz \"" ++ provider ++ "\"\n"
+    ++ " .asciz \"" ++ name ++ "\"\n"
+    ++ " .asciz \"";
 
     comptime const part3 =  "\"\n" ++
     \\ 994: .balign 4
